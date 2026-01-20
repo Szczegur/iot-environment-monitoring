@@ -58,7 +58,7 @@ and was developed for educational purposes.
 
 ---
 
-## 🛠 Technologies / Technologie
+## Technologies / Technologie
 
 - ESP32 (Arduino framework)
 - MQTT (Eclipse Mosquitto)
@@ -67,7 +67,3 @@ and was developed for educational purposes.
 - ArduinoJson
 
 ---
-
-## 📁 Project structure / Struktura projektu
-
-
