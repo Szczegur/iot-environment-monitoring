@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AirSense - Monitorowanie Jakości Powietrza</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0a0a0f; --bg-secondary: #12121a; --bg-card: #16161f;
+            --accent-primary: #6366f1; --accent-success: #22c55e; --accent-warning: #eab308; --accent-danger: #ef4444;
+            --text-primary: #f1f5f9; --text-secondary: #94a3b8; --text-muted: #64748b;
+            --color-temp: #f97316; --color-humidity: #06b6d4; --color-co2: #a855f7; --color-voc: #ec4899; --color-light: #fbbf24;
+            --border-color: rgba(255,255,255,0.06); --sidebar-width: 240px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg-primary); color: var(--text-primary); min-height: 100vh; }
+        .app { display: flex; min-height: 100vh; }
+        
+        .sidebar { width: var(--sidebar-width); background: var(--bg-secondary); border-right: 1px solid var(--border-color); position: fixed; height: 100vh; display: flex; flex-direction: column; }
+        .logo { padding: 1.5rem; border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 0.75rem; }
+        .logo-icon { width: 36px; height: 36px; background: linear-gradient(135deg, var(--accent-primary), #8b5cf6); border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+        .logo-icon svg { width: 20px; height: 20px; color: white; }
+        .logo-text { font-size: 1.25rem; font-weight: 700; background: linear-gradient(135deg, #818cf8, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .nav { padding: 1rem; flex: 1; }
+        .nav-item { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; color: var(--text-secondary); text-decoration: none; cursor: pointer; margin-bottom: 0.25rem; transition: all 0.2s; }
+        .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text-primary); }
+        .nav-item.active { background: rgba(99,102,241,0.15); color: #818cf8; }
+        .nav-item svg { width: 20px; height: 20px; }
+        .sidebar-footer { padding: 1rem; border-top: 1px solid var(--border-color); }
+        .status { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-secondary); }
+        .status-dot { width: 8px; height: 8px; background: var(--accent-success); border-radius: 50%; box-shadow: 0 0 8px var(--accent-success); }
+        
+        .main { flex: 1; margin-left: var(--sidebar-width); }
+        .header { padding: 1.5rem 2rem; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 10; }
+        .header h1 { font-size: 1.5rem; font-weight: 600; }
+        .header p { color: var(--text-secondary); font-size: 0.9rem; margin-top: 0.25rem; }
+        .header-right { display: flex; align-items: center; gap: 1.5rem; }
+        .node-select { display: flex; align-items: center; gap: 0.5rem; }
+        .node-select label { color: var(--text-secondary); font-size: 0.85rem; }
+        .node-select select { background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem 0.75rem; border-radius: 6px; cursor: pointer; }
+        .last-update { text-align: right; font-size: 0.8rem; }
+        .last-update span:first-child { color: var(--text-muted); display: block; }
+        .last-update span:last-child { color: var(--text-secondary); font-family: monospace; }
+        .refresh-info { font-size: 0.7rem; color: var(--accent-primary); margin-top: 2px; }
+        
+        .page { display: none; padding: 2rem; }
+        .page.active { display: block; }
+        
+        .alerts { margin-bottom: 1.5rem; }
+        .alert { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; border-radius: 8px; margin-bottom: 0.5rem; animation: slideIn 0.3s; }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } }
+        .alert-warning { background: rgba(234,179,8,0.1); border: 1px solid rgba(234,179,8,0.3); color: var(--accent-warning); }
+        .alert-danger { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--accent-danger); }
+        .alert svg { width: 18px; height: 18px; flex-shrink: 0; }
+        .alert span { flex: 1; }
+        .alert button { background: none; border: none; color: inherit; cursor: pointer; opacity: 0.7; font-size: 1.1rem; }
+        .alert button:hover { opacity: 1; }
+        
+        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; }
+        .metric-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem; transition: transform 0.2s, box-shadow 0.2s; }
+        .metric-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+        .metric-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; }
+        .metric-icon { width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+        .metric-icon svg { width: 22px; height: 22px; }
+        .metric-icon.temp { background: rgba(249,115,22,0.15); color: var(--color-temp); }
+        .metric-icon.humidity { background: rgba(6,182,212,0.15); color: var(--color-humidity); }
+        .metric-icon.co2 { background: rgba(168,85,247,0.15); color: var(--color-co2); }
+        .metric-icon.voc { background: rgba(236,72,153,0.15); color: var(--color-voc); }
+        .metric-icon.light { background: rgba(251,191,36,0.15); color: var(--color-light); }
+        .metric-info { flex: 1; }
+        .metric-label { font-weight: 500; display: block; }
+        .metric-sensor { font-size: 0.75rem; color: var(--text-muted); font-family: monospace; }
+        .metric-status { width: 10px; height: 10px; border-radius: 50%; }
+        .metric-status.ok { background: var(--accent-success); box-shadow: 0 0 6px var(--accent-success); }
+        .metric-status.warning { background: var(--accent-warning); box-shadow: 0 0 6px var(--accent-warning); animation: blink 1s infinite; }
+        .metric-status.danger { background: var(--accent-danger); box-shadow: 0 0 6px var(--accent-danger); animation: blink 0.5s infinite; }
+        @keyframes blink { 50% { opacity: 0.4; } }
+        .metric-value { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.5rem; }
+        .metric-value .value { font-size: 2.25rem; font-weight: 600; font-family: monospace; }
+        .metric-value.temp .value { color: var(--color-temp); }
+        .metric-value.humidity .value { color: var(--color-humidity); }
+        .metric-value.co2 .value { color: var(--color-co2); }
+        .metric-value.voc .value { color: var(--color-voc); }
+        .metric-value.light .value { color: var(--color-light); }
+        .metric-value .unit { color: var(--text-muted); font-size: 1.1rem; }
+        .metric-range { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+        .metric-chart { height: 70px; }
+        
+        .chart-section { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem; }
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+        .chart-header h2 { font-size: 1.1rem; font-weight: 500; }
+        .chart-header select { background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.4rem 0.75rem; border-radius: 6px; cursor: pointer; }
+        .chart-container { height: 320px; }
+        
+        .history-controls { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; padding: 1rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; margin-bottom: 1.5rem; }
+        .date-range { display: flex; gap: 1rem; flex-wrap: wrap; }
+        .date-range label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--text-muted); }
+        .date-range input { background: var(--bg-secondary); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; }
+        .btn-group { display: flex; gap: 0.5rem; }
+        .btn { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border-radius: 6px; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; }
+        .btn svg { width: 16px; height: 16px; }
+        .btn-primary { background: var(--accent-primary); color: white; }
+        .btn-primary:hover { background: #818cf8; }
+        .btn-secondary { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); }
+        .btn-secondary:hover { border-color: var(--accent-primary); }
+        .history-chart { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem; height: 380px; margin-bottom: 1.5rem; }
+        .stats { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem; }
+        .stats h3 { font-size: 1rem; margin-bottom: 1rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; }
+        .stat-item { background: var(--bg-secondary); padding: 0.75rem; border-radius: 8px; }
+        .stat-item .label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+        .stat-item .values { display: flex; justify-content: space-between; font-family: monospace; font-size: 0.85rem; }
+        .stat-item .min { color: #3b82f6; }
+        .stat-item .max { color: #ef4444; }
+        
+        .settings-section { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; max-width: 900px; }
+        .settings-section h2 { font-size: 1.15rem; margin-bottom: 0.5rem; }
+        .settings-section > p { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem; }
+        .threshold-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+        .threshold-card { background: var(--bg-secondary); border-radius: 10px; padding: 1rem; }
+        .threshold-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem; font-weight: 500; }
+        .threshold-inputs { display: flex; flex-direction: column; gap: 0.75rem; }
+        .threshold-inputs label { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8rem; color: var(--text-muted); }
+        .threshold-inputs input { background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.5rem; border-radius: 6px; font-family: monospace; }
+        .nodes-list { display: flex; flex-direction: column; gap: 0.5rem; }
+        .node-item { display: flex; align-items: center; justify-content: space-between; background: var(--bg-secondary); padding: 0.75rem 1rem; border-radius: 8px; }
+        .node-info { display: flex; align-items: center; gap: 0.75rem; }
+        .node-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent-success); }
+        .node-name { font-weight: 500; }
+        .node-id { font-size: 0.8rem; color: var(--text-muted); font-family: monospace; }
+        
+        .docs { display: grid; grid-template-columns: 200px 1fr; gap: 2rem; }
+        .docs-nav { position: sticky; top: 100px; height: fit-content; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 1rem; }
+        .docs-nav h3 { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
+        .docs-nav ul { list-style: none; }
+        .docs-nav a { display: block; padding: 0.5rem 0.75rem; color: var(--text-secondary); text-decoration: none; border-radius: 6px; font-size: 0.9rem; }
+        .docs-nav a:hover { background: var(--bg-secondary); color: var(--text-primary); }
+        .doc-section { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .doc-section h2 { font-size: 1.35rem; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--border-color); }
+        .doc-section h3 { font-size: 1.05rem; color: #818cf8; margin: 1.25rem 0 0.75rem; }
+        .doc-section p { color: var(--text-secondary); margin-bottom: 0.75rem; line-height: 1.7; }
+        .doc-section ul, .doc-section ol { color: var(--text-secondary); margin-left: 1.25rem; margin-bottom: 1rem; }
+        .doc-section li { margin-bottom: 0.4rem; }
+        .doc-section pre { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: 0.75rem 0; }
+        .doc-section code { font-family: monospace; font-size: 0.85rem; color: #818cf8; }
+        .doc-section pre code { color: var(--text-secondary); }
+        .doc-section table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.9rem; }
+        .doc-section th { background: var(--bg-secondary); padding: 0.6rem; text-align: left; border-bottom: 2px solid var(--border-color); }
+        .doc-section td { padding: 0.6rem; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); }
+        .arch-diagram { display: flex; flex-direction: column; align-items: center; padding: 1.25rem; background: var(--bg-secondary); border-radius: 10px; margin: 1rem 0; }
+        .arch-layer { text-align: center; margin: 0.4rem 0; }
+        .arch-layer h4 { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.4rem; font-weight: normal; }
+        .arch-box { display: inline-block; background: var(--bg-card); border: 1px solid var(--accent-primary); padding: 0.4rem 0.75rem; border-radius: 6px; margin: 0.2rem; font-size: 0.85rem; }
+        .arch-arrow { color: var(--accent-primary); font-size: 1rem; }
+        .sensor-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin: 1rem 0; }
+        .sensor-card { background: var(--bg-secondary); border-radius: 10px; padding: 1rem; }
+        .sensor-card h3 { color: #818cf8; margin: 0 0 0.4rem; font-size: 1rem; }
+        .sensor-card .desc { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem; }
+        .sensor-card table { width: 100%; font-size: 0.8rem; }
+        .sensor-card td { padding: 0.2rem 0; border: none; }
+        .sensor-card td:first-child { color: var(--text-muted); width: 45%; }
+        
+        .toast-container { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1000; }
+        .toast { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.4); margin-top: 0.5rem; animation: toastIn 0.3s; min-width: 250px; }
+        .toast.success { border-color: var(--accent-success); }
+        .toast.warning { border-color: var(--accent-warning); }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(50px); } }
+        
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .main { margin-left: 0; }
+            .docs { grid-template-columns: 1fr; }
+            .docs-nav { position: static; }
+        }
+    </style>
+</head>
+<body>
+<div class="app">
+    <aside class="sidebar">
+        <div class="logo">
+            <div class="logo-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v6m0 8v6M2 12h6m8 0h6"/></svg></div>
+            <span class="logo-text">AirSense</span>
+        </div>
+        <nav class="nav">
+            <a class="nav-item active" data-page="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Dashboard</span></a>
+            <a class="nav-item" data-page="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 16l4-4 4 4 5-6"/></svg><span>Historia</span></a>
+            <a class="nav-item" data-page="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg><span>Ustawienia</span></a>
+            <a class="nav-item" data-page="docs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg><span>Dokumentacja</span></a>
+        </nav>
+        <div class="sidebar-footer"><div class="status"><div class="status-dot"></div><span>System aktywny</span></div></div>
+    </aside>
+    
+    <main class="main">
+        <header class="header">
+            <div><h1 id="pageTitle">Dashboard</h1><p>Monitorowanie jakości powietrza w czasie rzeczywistym</p></div>
+            <div class="header-right">
+                <div class="node-select"><label>Węzeł:</label><select id="nodeSelect"><option value="node1">Salon</option><option value="node2">Biuro</option><option value="node3">Sypialnia</option></select></div>
+                <div class="last-update"><span>Ostatnia aktualizacja:</span><span id="lastUpdate">--:--:--</span><div class="refresh-info">Odświeżanie co 30s</div></div>
+            </div>
+        </header>
+        
+        <!-- Dashboard -->
+        <section id="dashboard" class="page active">
+            <div id="alerts" class="alerts"></div>
+            <div class="metrics">
+                <div class="metric-card"><div class="metric-header"><div class="metric-icon temp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg></div><div class="metric-info"><span class="metric-label">Temperatura</span><span class="metric-sensor">BME280</span></div><div class="metric-status" id="tempStatus"></div></div><div class="metric-value temp"><span class="value" id="tempVal">--</span><span class="unit">°C</span></div><div class="metric-range">Optymalnie: 18-24°C</div><div class="metric-chart"><canvas id="tempChart"></canvas></div></div>
+                <div class="metric-card"><div class="metric-header"><div class="metric-icon humidity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></div><div class="metric-info"><span class="metric-label">Wilgotność</span><span class="metric-sensor">BME280</span></div><div class="metric-status" id="humidityStatus"></div></div><div class="metric-value humidity"><span class="value" id="humidityVal">--</span><span class="unit">%</span></div><div class="metric-range">Optymalnie: 40-60%</div><div class="metric-chart"><canvas id="humidityChart"></canvas></div></div>
+                <div class="metric-card"><div class="metric-header"><div class="metric-icon co2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div><div class="metric-info"><span class="metric-label">CO₂</span><span class="metric-sensor">SGP30</span></div><div class="metric-status" id="co2Status"></div></div><div class="metric-value co2"><span class="value" id="co2Val">--</span><span class="unit">ppm</span></div><div class="metric-range">Optymalnie: &lt;1000 ppm</div><div class="metric-chart"><canvas id="co2Chart"></canvas></div></div>
+                <div class="metric-card"><div class="metric-header"><div class="metric-icon voc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M5.5 8.5l13 7M5.5 15.5l13-7"/></svg></div><div class="metric-info"><span class="metric-label">TVOC</span><span class="metric-sensor">SGP30</span></div><div class="metric-status" id="vocStatus"></div></div><div class="metric-value voc"><span class="value" id="vocVal">--</span><span class="unit">ppb</span></div><div class="metric-range">Optymalnie: &lt;250 ppb</div><div class="metric-chart"><canvas id="vocChart"></canvas></div></div>
+                <div class="metric-card"><div class="metric-header"><div class="metric-icon light"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg></div><div class="metric-info"><span class="metric-label">Oświetlenie</span><span class="metric-sensor">BH1750</span></div><div class="metric-status" id="lightStatus"></div></div><div class="metric-value light"><span class="value" id="lightVal">--</span><span class="unit">lux</span></div><div class="metric-range">Optymalnie: 300-500 lux</div><div class="metric-chart"><canvas id="lightChart"></canvas></div></div>
+            </div>
+            <div class="chart-section">
+                <div class="chart-header"><h2>Wykres w czasie rzeczywistym</h2><select id="chartFilter"><option value="all">Wszystkie</option><option value="temp">Temperatura</option><option value="humidity">Wilgotność</option><option value="co2">CO₂</option><option value="voc">TVOC</option><option value="light">Oświetlenie</option></select></div>
+                <div class="chart-container"><canvas id="mainChart"></canvas></div>
+            </div>
+        </section>
+        
+        <!-- History -->
+        <section id="history" class="page">
+            <div class="history-controls">
+                <div class="date-range"><label>Od:<input type="datetime-local" id="startDate"></label><label>Do:<input type="datetime-local" id="endDate"></label></div>
+                <div class="btn-group"><button class="btn btn-primary" onclick="loadHistory()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>Wczytaj</button><button class="btn btn-secondary" onclick="exportCSV()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>CSV</button></div>
+            </div>
+            <div class="history-chart"><canvas id="historyChart"></canvas></div>
+            <div class="stats"><h3>Statystyki</h3><div class="stats-grid" id="statsGrid"></div></div>
+        </section>
+        
+        <!-- Settings -->
+        <section id="settings" class="page">
+            <div class="settings-section"><h2>Progi ostrzegawcze</h2><p>Ustaw wartości graniczne. Przekroczenie spowoduje alert.</p>
+                <div class="threshold-grid">
+                    <div class="threshold-card"><div class="threshold-header"><div class="metric-icon temp"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/></svg></div>Temperatura</div><div class="threshold-inputs"><label>Min (°C)<input type="number" id="tempMin" value="18"></label><label>Max (°C)<input type="number" id="tempMax" value="26"></label></div></div>
+                    <div class="threshold-card"><div class="threshold-header"><div class="metric-icon humidity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></div>Wilgotność</div><div class="threshold-inputs"><label>Min (%)<input type="number" id="humMin" value="30"></label><label>Max (%)<input type="number" id="humMax" value="60"></label></div></div>
+                    <div class="threshold-card"><div class="threshold-header"><div class="metric-icon co2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/></svg></div>CO₂</div><div class="threshold-inputs"><label>Ostrzeżenie (ppm)<input type="number" id="co2Warn" value="1000"></label><label>Krytyczny (ppm)<input type="number" id="co2Crit" value="1500"></label></div></div>
+                    <div class="threshold-card"><div class="threshold-header"><div class="metric-icon voc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18M5.5 8.5l13 7M5.5 15.5l13-7"/></svg></div>TVOC</div><div class="threshold-inputs"><label>Ostrzeżenie (ppb)<input type="number" id="vocWarn" value="250"></label><label>Krytyczny (ppb)<input type="number" id="vocCrit" value="500"></label></div></div>
+                    <div class="threshold-card"><div class="threshold-header"><div class="metric-icon light"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/></svg></div>Oświetlenie</div><div class="threshold-inputs"><label>Min (lux)<input type="number" id="lightMin" value="200"></label><label>Max (lux)<input type="number" id="lightMax" value="750"></label></div></div>
+                </div>
+                <div class="btn-group"><button class="btn btn-primary" onclick="saveSettings()">Zapisz</button><button class="btn btn-secondary" onclick="resetSettings()">Domyślne</button></div>
+            </div>
+            <div class="settings-section"><h2>Węzły pomiarowe</h2><p>Lista skonfigurowanych węzłów w systemie.</p><div class="nodes-list" id="nodesList"></div></div>
+        </section>
+        
+        <!-- Docs - BEZ harmonogramu, BEZ backendu Python -->
+        <section id="docs" class="page">
+            <div class="docs">
+                <nav class="docs-nav"><h3>Spis treści</h3><ul>
+                    <li><a href="#doc1">1. Przegląd projektu</a></li>
+                    <li><a href="#doc2">2. Architektura systemu</a></li>
+                    <li><a href="#doc3">3. Wymagania FR/NFR</a></li>
+                    <li><a href="#doc4">4. Struktura MQTT</a></li>
+                    <li><a href="#doc5">5. Czujniki</a></li>
+                </ul></nav>
+                <div class="docs-content">
+                    <article id="doc1" class="doc-section">
+                        <h2>1. Przegląd projektu</h2>
+                        <p>System AirSense to rozwiązanie do monitorowania jakości powietrza w pomieszczeniach zamkniętych. System składa się z węzłów pomiarowych opartych na mikrokontrolerze ESP32 oraz interfejsu webowego do wizualizacji danych.</p>
+                        <h3>Cele projektu</h3>
+                        <ul>
+                            <li>Ciągłe monitorowanie parametrów środowiskowych w pomieszczeniach</li>
+                            <li>Wizualizacja danych w czasie rzeczywistym</li>
+                            <li>Alertowanie o przekroczeniach wartości krytycznych</li>
+                            <li>Archiwizacja i analiza danych historycznych</li>
+                            <li>Skalowalność - obsługa wielu węzłów pomiarowych</li>
+                        </ul>
+                        <h3>Monitorowane parametry</h3>
+                        <ul>
+                            <li><strong>Temperatura</strong> - komfort termiczny (18-24°C)</li>
+                            <li><strong>Wilgotność</strong> - wilgotność względna (40-60%)</li>
+                            <li><strong>CO₂</strong> - dwutlenek węgla (&lt;1000 ppm)</li>
+                            <li><strong>TVOC</strong> - lotne związki organiczne (&lt;250 ppb)</li>
+                            <li><strong>Oświetlenie</strong> - natężenie światła (300-500 lux)</li>
+                        </ul>
+                    </article>
+                    
+                    <article id="doc2" class="doc-section">
+                        <h2>2. Architektura systemu</h2>
+                        <p>System wykorzystuje architekturę warstwową z komunikacją przez protokół MQTT.</p>
+                        <div class="arch-diagram">
+                            <div class="arch-layer"><h4>Warstwa prezentacji</h4><div class="arch-box">Dashboard Web (HTML/CSS/JS)</div><div class="arch-box">Chart.js</div></div>
+                            <div class="arch-arrow">↓↑</div>
+                            <div class="arch-layer"><h4>Warstwa komunikacji</h4><div class="arch-box">Broker MQTT (Mosquitto)</div></div>
+                            <div class="arch-arrow">↓↑</div>
+                            <div class="arch-layer"><h4>Warstwa urządzeń</h4><div class="arch-box">ESP32 + BME280</div><div class="arch-box">ESP32 + SGP30</div><div class="arch-box">ESP32 + BH1750</div></div>
+                        </div>
+                        <h3>Przepływ danych</h3>
+                        <ol>
+                            <li>Węzeł ESP32 odczytuje dane z czujników przez magistralę I2C</li>
+                            <li>Dane są publikowane do brokera MQTT w formacie JSON</li>
+                            <li>Dashboard subskrybuje topiki MQTT i wyświetla dane w czasie rzeczywistym</li>
+                            <li>Dane są przechowywane lokalnie do analizy historycznej</li>
+                        </ol>
+                        <h3>Komunikacja</h3>
+                        <ul>
+                            <li><strong>Protokół:</strong> MQTT (Message Queuing Telemetry Transport)</li>
+                            <li><strong>Format danych:</strong> JSON</li>
+                            <li><strong>Interwał odświeżania:</strong> 30 sekund</li>
+                        </ul>
+                    </article>
+                    
+                    <article id="doc3" class="doc-section">
+                        <h2>3. Wymagania funkcjonalne i niefunkcjonalne</h2>
+                        <h3>Wymagania funkcjonalne (FR)</h3>
+                        <table>
+                            <thead><tr><th>ID</th><th>Opis</th><th>Priorytet</th></tr></thead>
+                            <tbody>
+                                <tr><td>FR-01</td><td>System musi odczytywać temperaturę, wilgotność i ciśnienie z czujnika BME280</td><td>Wysoki</td></tr>
+                                <tr><td>FR-02</td><td>System musi odczytywać poziom CO₂ i TVOC z czujnika SGP30</td><td>Wysoki</td></tr>
+                                <tr><td>FR-03</td><td>System musi odczytywać natężenie oświetlenia z czujnika BH1750</td><td>Wysoki</td></tr>
+                                <tr><td>FR-04</td><td>Węzeł musi publikować dane do brokera MQTT co 30 sekund</td><td>Wysoki</td></tr>
+                                <tr><td>FR-05</td><td>Dashboard musi wyświetlać aktualne wartości pomiarów</td><td>Wysoki</td></tr>
+                                <tr><td>FR-06</td><td>Dashboard musi wyświetlać wykresy danych historycznych</td><td>Wysoki</td></tr>
+                                <tr><td>FR-07</td><td>System musi alertować o przekroczeniu wartości krytycznych</td><td>Wysoki</td></tr>
+                                <tr><td>FR-08</td><td>Użytkownik musi mieć możliwość konfiguracji progów ostrzegawczych</td><td>Średni</td></tr>
+                                <tr><td>FR-09</td><td>System musi umożliwiać eksport danych do pliku CSV</td><td>Średni</td></tr>
+                                <tr><td>FR-10</td><td>System musi obsługiwać wiele węzłów pomiarowych</td><td>Wysoki</td></tr>
+                            </tbody>
+                        </table>
+                        <h3>Wymagania niefunkcjonalne (NFR)</h3>
+                        <table>
+                            <thead><tr><th>ID</th><th>Opis</th><th>Kategoria</th></tr></thead>
+                            <tbody>
+                                <tr><td>NFR-01</td><td>Opóźnienie wyświetlania danych nie może przekraczać 5 sekund</td><td>Wydajność</td></tr>
+                                <tr><td>NFR-02</td><td>System musi działać stabilnie przez minimum 7 dni bez restartu</td><td>Niezawodność</td></tr>
+                                <tr><td>NFR-03</td><td>Dashboard musi być responsywny (obsługa urządzeń mobilnych)</td><td>Użyteczność</td></tr>
+                                <tr><td>NFR-04</td><td>System musi obsługiwać minimum 10 węzłów pomiarowych</td><td>Skalowalność</td></tr>
+                                <tr><td>NFR-05</td><td>Dokładność pomiarów temperatury: ±0.5°C</td><td>Dokładność</td></tr>
+                                <tr><td>NFR-06</td><td>Interfejs musi być intuicyjny i czytelny</td><td>Użyteczność</td></tr>
+                            </tbody>
+                        </table>
+                    </article>
+                    
+                    <article id="doc4" class="doc-section">
+                        <h2>4. Struktura MQTT</h2>
+                        <h3>Konwencja nazewnictwa topiców</h3>
+                        <pre><code>airsense/{node_id}/{message_type}</code></pre>
+                        <h3>Topiki</h3>
+                        <table>
+                            <thead><tr><th>Topic</th><th>Kierunek</th><th>Opis</th></tr></thead>
+                            <tbody>
+                                <tr><td><code>airsense/{node_id}/data</code></td><td>Węzeł → Broker</td><td>Dane pomiarowe z czujników</td></tr>
+                                <tr><td><code>airsense/{node_id}/status</code></td><td>Węzeł → Broker</td><td>Status węzła (online/offline)</td></tr>
+                                <tr><td><code>airsense/{node_id}/config</code></td><td>Broker → Węzeł</td><td>Konfiguracja węzła</td></tr>
+                            </tbody>
+                        </table>
+                        <h3>Format wiadomości JSON</h3>
+                        <h4>Dane pomiarowe</h4>
+                        <pre><code>{
+  "node_id": "node1",
+  "timestamp": "2025-01-20T12:30:00Z",
+  "location": "Salon",
+  "sensors": {
+    "bme280": {
+      "temperature": 22.5,
+      "humidity": 45.2,
+      "pressure": 1013.25
+    },
+    "sgp30": {
+      "co2": 650,
+      "tvoc": 120
+    },
+    "bh1750": {
+      "light": 350
+    }
+  }
+}</code></pre>
+                        <h4>Status węzła</h4>
+                        <pre><code>{
+  "node_id": "node1",
+  "status": "online",
+  "uptime": 86400,
+  "wifi_rssi": -45
+}</code></pre>
+                    </article>
+                    
+                    <article id="doc5" class="doc-section">
+                        <h2>5. Specyfikacja czujników</h2>
+                        <div class="sensor-cards">
+                            <div class="sensor-card">
+                                <h3>BME280</h3>
+                                <p class="desc">Czujnik temperatury, wilgotności i ciśnienia atmosferycznego</p>
+                                <table>
+                                    <tr><td>Interfejs</td><td>I2C (adres 0x76 lub 0x77)</td></tr>
+                                    <tr><td>Temperatura</td><td>-40°C do +85°C (±0.5°C)</td></tr>
+                                    <tr><td>Wilgotność</td><td>0-100% RH (±3%)</td></tr>
+                                    <tr><td>Ciśnienie</td><td>300-1100 hPa (±1 hPa)</td></tr>
+                                    <tr><td>Napięcie</td><td>1.8V - 3.6V</td></tr>
+                                </table>
+                            </div>
+                            <div class="sensor-card">
+                                <h3>SGP30</h3>
+                                <p class="desc">Czujnik jakości powietrza - eCO2 i TVOC</p>
+                                <table>
+                                    <tr><td>Interfejs</td><td>I2C (adres 0x58)</td></tr>
+                                    <tr><td>eCO2</td><td>400 - 60000 ppm</td></tr>
+                                    <tr><td>TVOC</td><td>0 - 60000 ppb</td></tr>
+                                    <tr><td>Czas rozgrzewania</td><td>15 sekund</td></tr>
+                                    <tr><td>Napięcie</td><td>1.8V - 3.3V</td></tr>
+                                </table>
+                            </div>
+                            <div class="sensor-card">
+                                <h3>BH1750</h3>
+                                <p class="desc">Cyfrowy czujnik natężenia oświetlenia</p>
+                                <table>
+                                    <tr><td>Interfejs</td><td>I2C (adres 0x23 lub 0x5C)</td></tr>
+                                    <tr><td>Zakres</td><td>1 - 65535 lux</td></tr>
+                                    <tr><td>Rozdzielczość</td><td>1 lux</td></tr>
+                                    <tr><td>Dokładność</td><td>±20%</td></tr>
+                                    <tr><td>Napięcie</td><td>2.4V - 3.6V</td></tr>
+                                </table>
+                            </div>
+                        </div>
+                        <h3>Schemat połączeń I2C</h3>
+                        <pre><code>ESP32              Czujniki (BME280, SGP30, BH1750)
+--------------     ---------------------------------
+GPIO21 (SDA)   →   SDA (wszystkie czujniki)
+GPIO22 (SCL)   →   SCL (wszystkie czujniki)
+3.3V           →   VCC (wszystkie czujniki)
+GND            →   GND (wszystkie czujniki)
+
+Uwaga: Wszystkie czujniki są podłączone równolegle do tej samej magistrali I2C.
+Każdy czujnik ma unikalny adres, więc nie ma konfliktów.</code></pre>
+                    </article>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// Config
+const NODES = { node1: { name: 'Salon', loc: 'Parter' }, node2: { name: 'Biuro', loc: 'Piętro' }, node3: { name: 'Sypialnia', loc: 'Piętro' } };
+const COLORS = { temp: '#f97316', humidity: '#06b6d4', co2: '#a855f7', voc: '#ec4899', light: '#fbbf24' };
+const REFRESH_INTERVAL = 30000; // 30 sekund
+
+let thresholds = { temp: { min: 18, max: 26 }, humidity: { min: 30, max: 60 }, co2: { warn: 1000, crit: 1500 }, voc: { warn: 250, crit: 500 }, light: { min: 200, max: 750 } };
+let state = { node: 'node1', history: {}, charts: {}, t: 0 };
+
+// Simulator
+function simulate(node) {
+    state.t++;
+    const hour = new Date().getHours();
+    const base = { node1: { t: 22, h: 45, c: 600, v: 100, l: 350 }, node2: { t: 23, h: 40, c: 800, v: 150, l: 450 }, node3: { t: 20, h: 50, c: 500, v: 80, l: 100 } }[node];
+    const day = Math.sin((hour - 6) * Math.PI / 12);
+    const act = (hour >= 8 && hour <= 22) ? 1.2 : 0.8;
+    const n = () => (Math.random() - 0.5) * 2;
+    const drift = Math.sin(state.t / 50) * 0.5;
+    let co2 = base.c * act + n() * 50 + Math.abs(drift) * 100;
+    let voc = base.v * act + n() * 20 + Math.abs(drift) * 30;
+    if (Math.random() > 0.92) { co2 += 500; voc += 150; }
+    return {
+        ts: new Date().toISOString(),
+        temp: Math.round((base.t + day * 2 + n() * 0.3 + drift) * 10) / 10,
+        humidity: Math.round(Math.max(20, Math.min(80, base.h - day * 5 + n() * 2)) * 10) / 10,
+        co2: Math.round(Math.max(400, co2)),
+        voc: Math.round(Math.max(0, voc)),
+        light: Math.round(Math.max(0, hour >= 7 && hour <= 20 ? base.l + day * 200 + n() * 30 : 20 + n() * 10))
+    };
+}
+
+function genHistory(node, hours = 24) {
+    const data = [], now = new Date(), saved = state.t;
+    for (let i = hours * 12; i >= 0; i--) {
+        state.t = saved - i;
+        const d = simulate(node);
+        d.ts = new Date(now.getTime() - i * 5 * 60000).toISOString();
+        data.push(d);
+    }
+    state.t = saved;
+    return data;
+}
+
+// Charts
+function initCharts() {
+    Chart.defaults.color = '#94a3b8';
+    Chart.defaults.borderColor = 'rgba(255,255,255,0.06)';
+    ['temp', 'humidity', 'co2', 'voc', 'light'].forEach(m => {
+        const ctx = document.getElementById(m + 'Chart');
+        if (ctx) state.charts[m] = new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ data: [], borderColor: COLORS[m], backgroundColor: COLORS[m] + '20', fill: true, tension: 0.4, pointRadius: 0, borderWidth: 2 }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } }, animation: { duration: 150 } }
+        });
+    });
+    const mainCtx = document.getElementById('mainChart');
+    if (mainCtx) state.charts.main = new Chart(mainCtx, {
+        type: 'line',
+        data: { labels: [], datasets: [
+            { label: 'Temperatura (°C)', data: [], borderColor: COLORS.temp, tension: 0.3, pointRadius: 2, borderWidth: 2, fill: false },
+            { label: 'Wilgotność (%)', data: [], borderColor: COLORS.humidity, tension: 0.3, pointRadius: 2, borderWidth: 2, fill: false },
+            { label: 'CO₂ (/10)', data: [], borderColor: COLORS.co2, tension: 0.3, pointRadius: 2, borderWidth: 2, fill: false },
+            { label: 'TVOC (/10)', data: [], borderColor: COLORS.voc, tension: 0.3, pointRadius: 2, borderWidth: 2, fill: false },
+            { label: 'Lux (/10)', data: [], borderColor: COLORS.light, tension: 0.3, pointRadius: 2, borderWidth: 2, fill: false }
+        ] },
+        options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { legend: { position: 'top', labels: { usePointStyle: true, padding: 12 } } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } }, y: { grid: { color: 'rgba(255,255,255,0.03)' }, beginAtZero: true } }, animation: { duration: 150 } }
+    });
+    const histCtx = document.getElementById('historyChart');
+    if (histCtx) state.charts.history = new Chart(histCtx, {
+        type: 'line',
+        data: { labels: [], datasets: [
+            { label: 'Temperatura', data: [], borderColor: COLORS.temp, tension: 0.3, pointRadius: 1, borderWidth: 2, fill: false },
+            { label: 'Wilgotność', data: [], borderColor: COLORS.humidity, tension: 0.3, pointRadius: 1, borderWidth: 2, fill: false },
+            { label: 'CO₂ (/10)', data: [], borderColor: COLORS.co2, tension: 0.3, pointRadius: 1, borderWidth: 2, fill: false },
+            { label: 'TVOC (/10)', data: [], borderColor: COLORS.voc, tension: 0.3, pointRadius: 1, borderWidth: 2, fill: false },
+            { label: 'Lux (/10)', data: [], borderColor: COLORS.light, tension: 0.3, pointRadius: 1, borderWidth: 2, fill: false }
+        ] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { usePointStyle: true } } }, scales: { x: { grid: { display: false }, ticks: { maxTicksLimit: 12 } }, y: { grid: { color: 'rgba(255,255,255,0.03)' }, beginAtZero: true } } }
+    });
+}
+
+function updateCharts() {
+    const h = state.history[state.node] || [];
+    if (!h.length) return;
+    const labels = h.map(d => new Date(d.ts).toLocaleTimeString('pl', { hour: '2-digit', minute: '2-digit' }));
+    ['temp', 'humidity', 'co2', 'voc', 'light'].forEach(m => {
+        if (state.charts[m]) {
+            state.charts[m].data.labels = labels;
+            state.charts[m].data.datasets[0].data = h.map(d => d[m]);
+            state.charts[m].update('none');
+        }
+    });
+    if (state.charts.main) {
+        state.charts.main.data.labels = labels;
+        state.charts.main.data.datasets[0].data = h.map(d => d.temp);
+        state.charts.main.data.datasets[1].data = h.map(d => d.humidity);
+        state.charts.main.data.datasets[2].data = h.map(d => d.co2 / 10);
+        state.charts.main.data.datasets[3].data = h.map(d => d.voc / 10);
+        state.charts.main.data.datasets[4].data = h.map(d => d.light / 10);
+        state.charts.main.update('none');
+    }
+}
+
+// Update
+function update() {
+    const d = simulate(state.node);
+    if (!state.history[state.node]) state.history[state.node] = [];
+    state.history[state.node].push(d);
+    if (state.history[state.node].length > 60) state.history[state.node].shift();
+    
+    document.getElementById('tempVal').textContent = d.temp.toFixed(1);
+    document.getElementById('humidityVal').textContent = d.humidity.toFixed(1);
+    document.getElementById('co2Val').textContent = d.co2;
+    document.getElementById('vocVal').textContent = d.voc;
+    document.getElementById('lightVal').textContent = d.light;
+    
+    setStatus('tempStatus', d.temp < thresholds.temp.min || d.temp > thresholds.temp.max ? 'warning' : 'ok');
+    setStatus('humidityStatus', d.humidity < thresholds.humidity.min || d.humidity > thresholds.humidity.max ? 'warning' : 'ok');
+    setStatus('co2Status', d.co2 >= thresholds.co2.crit ? 'danger' : d.co2 >= thresholds.co2.warn ? 'warning' : 'ok');
+    setStatus('vocStatus', d.voc >= thresholds.voc.crit ? 'danger' : d.voc >= thresholds.voc.warn ? 'warning' : 'ok');
+    setStatus('lightStatus', d.light < thresholds.light.min || d.light > thresholds.light.max ? 'warning' : 'ok');
+    
+    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pl');
+    checkAlerts(d);
+    updateCharts();
+}
+
+function setStatus(id, s) { document.getElementById(id).className = 'metric-status ' + s; }
+
+function checkAlerts(d) {
+    const alerts = [];
+    if (d.co2 >= thresholds.co2.crit) alerts.push({ t: 'danger', m: `Krytyczny CO₂: ${d.co2} ppm!` });
+    else if (d.co2 >= thresholds.co2.warn) alerts.push({ t: 'warning', m: `Wysoki CO₂: ${d.co2} ppm` });
+    if (d.voc >= thresholds.voc.crit) alerts.push({ t: 'danger', m: `Krytyczny TVOC: ${d.voc} ppb!` });
+    else if (d.voc >= thresholds.voc.warn) alerts.push({ t: 'warning', m: `Wysoki TVOC: ${d.voc} ppb` });
+    document.getElementById('alerts').innerHTML = alerts.map(a => `<div class="alert alert-${a.t}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg><span>${a.m}</span><button onclick="this.parentElement.remove()">✕</button></div>`).join('');
+}
+
+// History
+function loadHistory() {
+    const start = document.getElementById('startDate').value, end = document.getElementById('endDate').value;
+    if (!start || !end) { toast('Wybierz daty', 'warning'); return; }
+    const data = genHistory(state.node, 24);
+    const s = new Date(start), e = new Date(end);
+    const f = data.filter(d => { const t = new Date(d.ts); return t >= s && t <= e; });
+    if (state.charts.history && f.length) {
+        const labels = f.map(d => new Date(d.ts).toLocaleString('pl', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }));
+        state.charts.history.data.labels = labels;
+        state.charts.history.data.datasets[0].data = f.map(d => d.temp);
+        state.charts.history.data.datasets[1].data = f.map(d => d.humidity);
+        state.charts.history.data.datasets[2].data = f.map(d => d.co2 / 10);
+        state.charts.history.data.datasets[3].data = f.map(d => d.voc / 10);
+        state.charts.history.data.datasets[4].data = f.map(d => d.light / 10);
+        state.charts.history.update();
+    }
+    updateStats(f);
+    toast(`Wczytano ${f.length} rekordów`, 'success');
+}
+
+function updateStats(data) {
+    if (!data.length) return;
+    const calc = arr => ({ min: Math.min(...arr), max: Math.max(...arr), avg: arr.reduce((a,b)=>a+b,0)/arr.length });
+    const s = { temp: calc(data.map(d=>d.temp)), humidity: calc(data.map(d=>d.humidity)), co2: calc(data.map(d=>d.co2)), voc: calc(data.map(d=>d.voc)), light: calc(data.map(d=>d.light)) };
+    document.getElementById('statsGrid').innerHTML = `
+        <div class="stat-item"><div class="label">Temperatura (°C)</div><div class="values"><span class="min">Min: ${s.temp.min.toFixed(1)}</span><span>Śr: ${s.temp.avg.toFixed(1)}</span><span class="max">Max: ${s.temp.max.toFixed(1)}</span></div></div>
+        <div class="stat-item"><div class="label">Wilgotność (%)</div><div class="values"><span class="min">Min: ${s.humidity.min.toFixed(1)}</span><span>Śr: ${s.humidity.avg.toFixed(1)}</span><span class="max">Max: ${s.humidity.max.toFixed(1)}</span></div></div>
+        <div class="stat-item"><div class="label">CO₂ (ppm)</div><div class="values"><span class="min">Min: ${s.co2.min}</span><span>Śr: ${s.co2.avg.toFixed(0)}</span><span class="max">Max: ${s.co2.max}</span></div></div>
+        <div class="stat-item"><div class="label">TVOC (ppb)</div><div class="values"><span class="min">Min: ${s.voc.min}</span><span>Śr: ${s.voc.avg.toFixed(0)}</span><span class="max">Max: ${s.voc.max}</span></div></div>
+        <div class="stat-item"><div class="label">Oświetlenie (lux)</div><div class="values"><span class="min">Min: ${s.light.min}</span><span>Śr: ${s.light.avg.toFixed(0)}</span><span class="max">Max: ${s.light.max}</span></div></div>`;
+}
+
+function exportCSV() {
+    const data = genHistory(state.node, 24);
+    let csv = 'Timestamp,Temperature,Humidity,CO2,TVOC,Light\n';
+    data.forEach(r => csv += `${r.ts},${r.temp},${r.humidity},${r.co2},${r.voc},${r.light}\n`);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    link.download = `airsense_${state.node}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    toast('Eksport CSV zakończony', 'success');
+}
+
+// Settings
+function saveSettings() {
+    thresholds = {
+        temp: { min: +document.getElementById('tempMin').value, max: +document.getElementById('tempMax').value },
+        humidity: { min: +document.getElementById('humMin').value, max: +document.getElementById('humMax').value },
+        co2: { warn: +document.getElementById('co2Warn').value, crit: +document.getElementById('co2Crit').value },
+        voc: { warn: +document.getElementById('vocWarn').value, crit: +document.getElementById('vocCrit').value },
+        light: { min: +document.getElementById('lightMin').value, max: +document.getElementById('lightMax').value }
+    };
+    localStorage.setItem('thresholds', JSON.stringify(thresholds));
+    toast('Ustawienia zapisane', 'success');
+}
+
+function resetSettings() {
+    thresholds = { temp: { min: 18, max: 26 }, humidity: { min: 30, max: 60 }, co2: { warn: 1000, crit: 1500 }, voc: { warn: 250, crit: 500 }, light: { min: 200, max: 750 } };
+    document.getElementById('tempMin').value = 18; document.getElementById('tempMax').value = 26;
+    document.getElementById('humMin').value = 30; document.getElementById('humMax').value = 60;
+    document.getElementById('co2Warn').value = 1000; document.getElementById('co2Crit').value = 1500;
+    document.getElementById('vocWarn').value = 250; document.getElementById('vocCrit').value = 500;
+    document.getElementById('lightMin').value = 200; document.getElementById('lightMax').value = 750;
+    localStorage.removeItem('thresholds');
+    toast('Przywrócono domyślne', 'success');
+}
+
+function loadNodes() {
+    document.getElementById('nodesList').innerHTML = Object.entries(NODES).map(([id, n]) => `<div class="node-item"><div class="node-info"><div class="node-dot"></div><div><div class="node-name">${n.name}</div><div class="node-id">${id} • ${n.loc}</div></div></div><span style="color:var(--accent-success)">Online</span></div>`).join('');
+}
+
+// Navigation
+function navigate(page) {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.toggle('active', i.dataset.page === page));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById(page).classList.add('active');
+    document.getElementById('pageTitle').textContent = { dashboard: 'Dashboard', history: 'Historia', settings: 'Ustawienia', docs: 'Dokumentacja' }[page];
+    if (page === 'settings') loadNodes();
+}
+
+// Toast
+function toast(msg, type = 'success') {
+    const t = document.createElement('div');
+    t.className = `toast ${type}`;
+    t.innerHTML = `<span>${msg}</span>`;
+    document.getElementById('toasts').appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('thresholds');
+    if (saved) thresholds = JSON.parse(saved);
+    
+    const now = new Date(), yesterday = new Date(now - 86400000);
+    document.getElementById('endDate').value = now.toISOString().slice(0, 16);
+    document.getElementById('startDate').value = yesterday.toISOString().slice(0, 16);
+    
+    initCharts();
+    
+    document.querySelectorAll('.nav-item').forEach(i => i.addEventListener('click', () => navigate(i.dataset.page)));
+    document.getElementById('nodeSelect').addEventListener('change', e => { state.node = e.target.value; state.history[state.node] = []; update(); });
+    document.getElementById('chartFilter').addEventListener('change', e => {
+        const v = e.target.value;
+        if (state.charts.main) {
+            state.charts.main.data.datasets.forEach((ds, i) => ds.hidden = v !== 'all' && !['temp','humidity','co2','voc','light'][i].startsWith(v));
+            state.charts.main.update();
+        }
+    });
+    
+    update();
+    setInterval(update, REFRESH_INTERVAL); // Odświeżanie co 30 sekund
+});
+</script>
+</body>
+</html>
