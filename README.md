@@ -1,4 +1,3 @@
-# iot-environment-monitoring
 # IoT Environment Monitoring System  
 # System monitoringu środowiska IoT
 
